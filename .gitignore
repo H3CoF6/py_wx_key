@@ -1,2 +1,5 @@
 build/
 .idea/
+dist/
+*.pyd
+wx_key.egg-info/
