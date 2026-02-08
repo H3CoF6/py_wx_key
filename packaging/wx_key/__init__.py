@@ -1,3 +1,1 @@
-"""
-空文件
-"""
+from .wx_key import *

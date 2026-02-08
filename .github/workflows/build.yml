@@ -1,0 +1,63 @@
+name: Build All Wheels
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build for Python ${{ matrix.python-version }}
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        pip install setuptools wheel pybind11 cmake
+
+    - name: CMake Configuration
+      run: |
+        $pb_path = python -c "import pybind11; print(pybind11.get_cmake_dir())"
+        cmake -S . -B build "-Dpybind11_DIR=$pb_path" -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build Extension
+      run: |
+        cmake --build build --config Release
+
+
+    - name: Move pyd to packaging
+      run: |
+        if (-not (Test-Path "packaging/wx_key")) { New-Item -ItemType Directory -Path "packaging/wx_key" }
+        Copy-Item "build/Release/*.pyd" -Destination "packaging/wx_key/" -Force
+        if (-not (Test-Path "packaging/wx_key/__init__.py")) { "from .wx_key import *" | Out-File "packaging/wx_key/__init__.py" -Encoding utf8 }
+
+    - name: Build Wheel
+      working-directory: ./packaging
+      run: |
+        python setup.py bdist_wheel
+
+    - name: Upload Wheel artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: wheel-${{ matrix.python-version }}
+        path: packaging/dist/*.whl
+
+  merge_artifacts:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: all-wheels
+          pattern: wheel-*
