@@ -14,4 +14,4 @@ Hook Address   : 0x1805325cc
 
 demo运行示例（更好的是，**拿到数据库密钥后，应该立即卸载指令**）
 
-![image-20260208175809389](C:\Users\17078\AppData\Roaming\Typora\typora-user-images\image-20260208175809389.png)
+![image-20260208175809389](..\img\image-20260208175809389.png)
