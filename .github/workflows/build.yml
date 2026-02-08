@@ -11,7 +11,7 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
     - uses: actions/checkout@v4
@@ -27,8 +27,16 @@ jobs:
 
     - name: CMake Configuration
       run: |
+        $py_path = python -c "import sys; print(sys.executable)"
+        
         $pb_path = python -c "import pybind11; print(pybind11.get_cmake_dir())"
-        cmake -S py_wx_key -B build "-Dpybind11_DIR=$pb_path" -DCMAKE_BUILD_TYPE=Release
+        
+        Write-Host "Force CMake to use Python at: $py_path"
+
+        cmake -S py_wx_key -B build `
+          "-Dpybind11_DIR=$pb_path" `
+          "-DPython3_EXECUTABLE=$py_path" `
+          -DCMAKE_BUILD_TYPE=Release                 
 
     - name: Build Extension
       run: |
