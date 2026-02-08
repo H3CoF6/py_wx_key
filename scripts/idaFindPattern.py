@@ -163,7 +163,7 @@ def main():
         print("\n" + "=" * 20 + " 复制以下内容到 Python/C++ " + "=" * 20)
 
         # 1. Pattern (用于 pattern 参数)
-        print(f"pattern = \"{pat}\"")
+        print(f"pattern = \"{pat.replace('?','00')}\"")
 
         # 2. Mask (用于 mask 参数)
         # 将 x/? 格式转换为 C++ 易读格式
