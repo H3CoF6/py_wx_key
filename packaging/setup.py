@@ -10,8 +10,9 @@ setup(
     description='WeChat Key Hook',
     packages=find_packages(),
     package_data={
-        'wx_key': ['*.pyd'],  # 包含 .pyd 文件
+        'wx_key': ['*.pyd'],
     },
     distclass=BinaryDistribution,
-    options={'bdist_wheel': {'python_tag': 'cp313', 'plat_name': 'win_amd64'}},
+
+    options={'bdist_wheel': {'plat_name': 'win_amd64'}},
 )
