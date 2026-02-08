@@ -35,7 +35,7 @@ jobs:
 
         cmake -S py_wx_key -B build `
           "-Dpybind11_DIR=$pb_path" `
-          "-DPython3_EXECUTABLE=$py_path" `
+          "-DPython_EXECUTABLE=$py_path" `
           -DCMAKE_BUILD_TYPE=Release                 
 
     - name: Build Extension
