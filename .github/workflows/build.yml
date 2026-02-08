@@ -28,7 +28,7 @@ jobs:
     - name: CMake Configuration
       run: |
         $pb_path = python -c "import pybind11; print(pybind11.get_cmake_dir())"
-        cmake -S . -B build "-Dpybind11_DIR=$pb_path" -DCMAKE_BUILD_TYPE=Release
+        cmake -S py_wx_key -B build "-Dpybind11_DIR=$pb_path" -DCMAKE_BUILD_TYPE=Release
 
     - name: Build Extension
       run: |
