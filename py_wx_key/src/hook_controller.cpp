@@ -172,23 +172,34 @@ namespace {
             if (g_ctx.csInitialized) LeaveCriticalSection(&g_ctx.dataLock);
         }
 
-        // --- MD5 逻辑变动：收到明文，本地哈希，对 Python 隐藏 ---
         if (data.md5Size == 64) {
             char rawStr[65] = { 0 };
             memcpy(rawStr, data.md5Buffer, 64);
 
-            // 计算实际的字符串长度 (遇到 \0 停止)
+     
             size_t actualLen = 0;
             while (actualLen < 64 && rawStr[actualLen] != '\0') {
                 actualLen++;
             }
 
             if (actualLen > 0) {
-                // 仅暴露出计算完成后的 Hash，绝不暴露 rawStr
                 std::string md5Hash = CalculateMD5(rawStr, static_cast<DWORD>(actualLen));
 
+                unsigned long long deviceCode = 0;
+                for (size_t i = 0; i < actualLen; i++) {
+                    if (rawStr[i] >= '0' && rawStr[i] <= '9') {
+                        deviceCode = deviceCode * 10 + (rawStr[i] - '0');
+                    }
+                    else {
+                        break;
+                    }
+                }
+                int xorKey = deviceCode & 0xFF;
+
+                std::string resultData = md5Hash.substr(0, 16) + "|" + std::to_string(xorKey);
+
                 if (g_ctx.csInitialized) EnterCriticalSection(&g_ctx.dataLock);
-                g_ctx.pendingMd5Data = md5Hash;
+                g_ctx.pendingMd5Data = resultData;
                 g_ctx.hasNewMd5 = true;
                 updated = true;
                 if (g_ctx.csInitialized) LeaveCriticalSection(&g_ctx.dataLock);
