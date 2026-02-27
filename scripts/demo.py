@@ -1,83 +1,177 @@
-import wx_key
-import time
 import sys
+import time
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich.live import Live
+from rich.spinner import Spinner
+
+try:
+    import wx_key
+except ImportError:
+    print("[!] 无法导入 wx_key 模块，请确保编译成功且 .pyd 文件在当前目录。")
+    sys.exit(1)
+
+# 初始化 Rich 控制台
+console = Console()
 
 # ================= 配置区域 =================
-# 1. 在任务管理器找到 WeChat.exe 的 PID 填入此处
+# 1. 目标微信进程 PID (任务管理器中查看)
 TARGET_PID = 4516  # <--- 请修改这里！！！
 
-# 2. IDA 脚本生成的特征数据
-IDA_PATTERN = "55 41 57 41 56 56 57 53 48 83 EC 58 48 8D 6C 24 00 48 C7 45 00 FE FF FF FF 44 89 CF 44 89 C3 49 89 D6"
-IDA_MASK = "xxxxxxxxxxxxxxxx?xxxxxxxxxxxxxxxxx"
-IDA_OFFSET = 12
+# 2. DB Key 特征码 (获取数据库解密密钥)
+KEY_PATTERN = "55 41 57 41 56 56 57 53 48 83 EC 58 48 8D 6C 24 00 48 C7 45 00 FE FF FF FF 44 89 CF 44 89 C3 49 89 D6"
+KEY_MASK = "xxxxxxxxxxxxxxxx?xxxxxxxxxxxxxxxxx"
+KEY_OFFSET = 12
+
+MD5_PATTERN = "48 8D 4D 00 48 89 4D B0 48 89 45 B8 48 8D 7D 00 48 8D 55 B0 48 89 F9"
+MD5_MASK = "xxx?xxxxxxxxxxx?xxxxxxx"
+MD5_OFFSET = 0
 
 
 # ===========================================
 
+def print_header():
+    """打印华丽的启动横幅和配置信息"""
+    title = Text("WeChat Dual-Hook System (DB Key + MD5)", justify="center", style="bold magenta")
+
+    table = Table(show_header=False, expand=True, border_style="cyan")
+    table.add_column("Property", style="bold cyan", width=20)
+    table.add_column("Value", style="green")
+
+    table.add_row("Target PID", str(TARGET_PID))
+    table.add_row("DB Key Pattern", f"{KEY_PATTERN[:30]}...")
+    table.add_row("MD5 Pattern", f"{MD5_PATTERN[:30]}...")
+    table.add_row("Hook Strategy", "Inline Hook (Trampoline) + Stack Spoofing")
+    table.add_row("IPC Method", "Shared Memory Polling (No injected threads)")
+    table.add_row("Bypass Tech", "Dynamic 90 NOP skipping for MD5 CALL alignment")
+
+    panel = Panel(table, title=title, border_style="blue", padding=(1, 2))
+    console.print(panel)
+
+
+def poll_logs():
+    """抽取并打印 C++ 后端的内部状态日志"""
+    while True:
+        msg, level = wx_key.get_status_message()
+        if msg is None:
+            break
+
+        # 0=Info, 1=Success, 2=Error
+        if level == 0:
+            console.print(f"[dim cyan][*] Backend:[/dim cyan] {msg}")
+        elif level == 1:
+            console.print(f"[bold green][+] Backend:[/bold green] {msg}")
+        elif level == 2:
+            console.print(f"[bold red][!] Backend ERROR:[/bold red] {msg}")
+
+
+def display_captured_data(data_type, data_value):
+    """华丽地展示捕获到的数据"""
+    if data_type == "key":
+        title = "🔑 成功捕获: 数据库解密密钥 (DB Key)"
+        color = "green"
+    else:
+        title = "📦 成功捕获: 登录校验值 (MD5)"
+        color = "yellow"
+
+    content = f"[{color} bold]{data_value}[/]\n\n[dim]你现在可以使用此数据进行后续操作。[/]"
+    console.print(Panel(content, title=title, border_style=color, expand=False))
+
+
 def main():
-    print(f"[*] 正在尝试 Hook 进程 PID: {TARGET_PID}")
-    print(f"[*] 特征码: {IDA_PATTERN[:20]}...")
-    print(f"[*] 偏移量: {IDA_OFFSET}")
+    print_header()
+
+    console.print("\n[bold yellow][*] 正在向目标进程注入双 Hook...[/bold yellow]")
 
     # -----------------------------------------------------------
-    # 1. 初始化 Hook (对应 C# InitializeHook)
+    # 1. 初始化双 Hook (传入两组特征码)
     # -----------------------------------------------------------
-    # 参数: pid, version(留空), pattern, mask, offset
-    if not wx_key.initialize_hook(TARGET_PID, "", IDA_PATTERN, IDA_MASK, IDA_OFFSET):
-        # 获取错误信息 (对应 C# GetLastErrorMsg)
+    success = wx_key.initialize_hook(
+        TARGET_PID,
+        "",  # 版本号留空，不强制校验
+        KEY_PATTERN, KEY_MASK, KEY_OFFSET,
+        MD5_PATTERN, MD5_MASK, MD5_OFFSET
+    )
+
+    # 立即拉取初始化过程中的日志
+    poll_logs()
+
+    if not success:
         err = wx_key.get_last_error_msg()
-        print(f"\n[!] 初始化失败: {err}")
-        print("[!] 请检查 PID 是否正确，或尝试以【管理员身份】运行此脚本。")
+        console.print(f"\n[bold red]❌ Hook 初始化失败: {err}[/bold red]")
+        console.print("[dim]提示: 请检查 PID 是否正确，特征码是否匹配当前版本，以及是否以【管理员身份】运行。[/dim]")
         return
 
-    print("[+] Hook 初始化成功！正在监听密钥输出 (按 Ctrl+C 停止)...")
-    print("-" * 50)
+    console.print("\n[bold green]✅ Hook 系统已启动并挂载！[/bold green]")
+    console.print("[cyan]原理说明:[/cyan]")
+    console.print("  1. [dim]已在目标内存开辟共享内存区用于 IPC 通信。[/dim]")
+    console.print("  2. [dim]MD5 Hook 已智能越过可能的 `90 NOP` 对齐指令，精准捕获 RAX 返回值。[/dim]")
+    console.print("  3. [dim]当前处于轮询等待状态，请在微信中执行【登录】或【解锁】操作触发函数。[/dim]\n")
+
+    # 记录是否已经抓到数据
+    captured_key = False
+    captured_md5 = False
 
     try:
-        while True:
-            # -----------------------------------------------------------
-            # 2. 轮询密钥 (对应 C# PollKeyData)
-            # -----------------------------------------------------------
-            # 只要有 key 返回，就说明截获到了
-            key = wx_key.poll_key_data()
-            if key:
-                print(f"\n[★ KEY FOUND] 成功获取密钥: {key}")
-                print(f"[★] 你现在可以使用这个密钥去解密数据库了！\n")
-
-            # -----------------------------------------------------------
-            # 3. 轮询内部日志 (对应 C# GetStatusMessage)
-            # -----------------------------------------------------------
-            # 循环读取，直到把积压的日志读完
+        # 使用 rich 的 Spinner 制作等待动画
+        with Live(Spinner("dots", text="等待用户在微信中操作触发 Hook... (按 Ctrl+C 退出)", style="magenta"),
+                  refresh_per_second=10) as live:
             while True:
+                # -----------------------------------------------------------
+                # 2. 轮询内部日志
+                # -----------------------------------------------------------
+                # 暂停一下动画，打印日志后再恢复
                 msg, level = wx_key.get_status_message()
-                if msg is None:
-                    break
+                while msg is not None:
+                    # 停止动画以避免输出错乱
+                    live.stop()
+                    if level == 0:
+                        console.print(f"[dim cyan][*] Backend:[/dim cyan] {msg}")
+                    elif level == 1:
+                        console.print(f"[bold green][+] Backend:[/bold green] {msg}")
+                    elif level == 2:
+                        console.print(f"[bold red][!] Backend ERROR:[/bold red] {msg}")
+                    live.start()  # 恢复动画
+                    msg, level = wx_key.get_status_message()
 
-                # 格式化日志等级 (0=Info, 1=Success, 2=Error)
-                tag_map = {0: "INFO", 1: "SUCCESS", 2: "ERROR"}
-                tag = tag_map.get(level, "LOG")
+                # -----------------------------------------------------------
+                # 3. 轮询 Hook 截获的数据
+                # -----------------------------------------------------------
+                # 返回的是一个字典：{'key': '...', 'md5': '...'} 或 None
+                result = wx_key.poll_key_data()
 
-                # 只有 Error 和 Success 才高亮显示，普通 Info 太多了可能会刷屏
-                if level == 2:
-                    print(f"[{tag}] {msg}")
-                else:
-                    print(f"[{tag}] {msg}")
+                if result:
+                    live.stop()  # 停止加载动画
 
-            # -----------------------------------------------------------
-            # 4. 避免 CPU 跑满 (对应 C# await Task.Delay(100))
-            # -----------------------------------------------------------
-            time.sleep(0.1)
+                    if 'key' in result:
+                        display_captured_data("key", result['key'])
+                        captured_key = True
+
+                    if 'md5' in result:
+                        display_captured_data("md5", result['md5'])
+                        captured_md5 = True
+
+                    if captured_key and captured_md5:
+                        console.print("\n[bold green]🎉 恭喜！双重数据已全部收集完毕！[/bold green]")
+                        # 你可以在这里选择 break 退出，或者继续监听
+                        # break
+
+                    live.start()  # 恢复加载动画
+
+                time.sleep(0.05)  # 50ms 轮询一次，兼顾性能与响应速度
 
     except KeyboardInterrupt:
-        print("\n[*] 用户手动停止...")
+        console.print("\n[bold yellow][*] 收到中断信号，准备退出...[/bold yellow]")
 
     finally:
         # -----------------------------------------------------------
-        # 5. 清理资源 (对应 C# CleanupHook) - 非常重要！！
+        # 4. 安全卸载 Hook
         # -----------------------------------------------------------
-        print("[*] 正在卸载 Hook...")
+        console.print("[*] 正在清理内存并还原目标进程的指令集...")
         wx_key.cleanup_hook()
-        print("[+] 资源已释放，程序退出。")
+        console.print("[bold green]✅ 资源释放完毕，安全退出。[/bold green]")
 
 
 if __name__ == "__main__":
