@@ -31,7 +31,7 @@ public:
         reset();
     }
 
-    bool allocate(HANDLE process, SIZE_T size, ULONG protect, uintptr_t targetAddress) {
+    bool allocate_near(HANDLE process, SIZE_T size, ULONG protect, uintptr_t targetAddress) {
         reset();
         hProcess = process;
         sizeBytes = size;
