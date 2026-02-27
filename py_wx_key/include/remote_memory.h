@@ -8,6 +8,8 @@
 class RemoteMemory {
 public:
     RemoteMemory() = default;
+
+    // 构造函数调用基础分配
     RemoteMemory(HANDLE process, SIZE_T size, ULONG protect) {
         allocate(process, size, protect);
     }
@@ -31,6 +33,30 @@ public:
         reset();
     }
 
+    // 1. 基础分配函数（3个参数）- 供 IPC、伪栈等非敏感区域使用
+    bool allocate(HANDLE process, SIZE_T size, ULONG protect) {
+        reset();
+        hProcess = process;
+        sizeBytes = size;
+        base = nullptr;
+        SIZE_T regionSize = size;
+        NTSTATUS status = IndirectSyscalls::NtAllocateVirtualMemory(
+            hProcess,
+            &base,
+            0,
+            &regionSize,
+            MEM_COMMIT | MEM_RESERVE,
+            protect
+        );
+        if (status != STATUS_SUCCESS) {
+            base = nullptr;
+            sizeBytes = 0;
+            return false;
+        }
+        return true;
+    }
+
+    // 2. 近战分配函数（4个参数）- 专供 Hook 蹦床和 Shellcode 使用
     bool allocate_near(HANDLE process, SIZE_T size, ULONG protect, uintptr_t targetAddress) {
         reset();
         hProcess = process;
@@ -45,7 +71,7 @@ public:
         MEMORY_BASIC_INFORMATION mbi;
         uintptr_t current = targetAddress;
 
-        // 1. 优先向低地址方向精准扫描可用内存块
+        // 优先向低地址方向精准扫描可用内存块
         while (current > min_addr) {
             if (VirtualQueryEx(process, (LPCVOID)current, &mbi, sizeof(mbi)) == 0) break;
 
@@ -67,7 +93,7 @@ public:
             current = (uintptr_t)mbi.BaseAddress - 1;
         }
 
-        // 2. 如果低地址没有，向高地址方向扫描
+        // 如果低地址没有，向高地址方向扫描
         current = targetAddress;
         while (current < max_addr) {
             if (VirtualQueryEx(process, (LPCVOID)current, &mbi, sizeof(mbi)) == 0) break;
@@ -91,7 +117,7 @@ public:
             current = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
         }
 
-        // 3. 实在没有 2GB 内的空间，只能回退到远跳（几率极小）
+        // 实在没有 2GB 内的空间，回退到普通随机分配
         return allocate(process, size, protect);
     }
 
