@@ -18,7 +18,7 @@ console = Console()
 
 # ================= 配置区域 =================
 # 1. 目标微信进程 PID (任务管理器中查看)
-TARGET_PID = 20088
+TARGET_PID = 29536
 
 KEY_PATTERN = "24 08 48 89 6c 24 10 48 89 74 00 18 48 89 7c 00 20 41 56 48 83 ec 50 41"
 KEY_MASK = "xxxxxxxxxx?xxxx?xxxxxxxx"
@@ -28,12 +28,11 @@ MD5_PATTERN = "48 8D 4D 00 48 89 4D B0 48 89 45 B8 48 8D 7D 00 48 8D 55 B0 48 89
 MD5_MASK = "xxx?xxxxxxxxxxx?xxxxxxx"
 MD5_OFFSET = 4
 
-
 # ===========================================
 
 def print_header():
     """打印华丽的启动横幅和配置信息"""
-    title = Text("WeChat Dual-Hook System (DB Key + MD5)", justify="center", style="bold magenta")
+    title = Text("WeChat Dual-Hook System (DB Key + Image Key)", justify="center", style="bold magenta")
 
     table = Table(show_header=False, expand=True, border_style="cyan")
     table.add_column("Property", style="bold cyan", width=20)
@@ -41,10 +40,9 @@ def print_header():
 
     table.add_row("Target PID", str(TARGET_PID))
     table.add_row("DB Key Pattern", f"{KEY_PATTERN[:30]}...")
-    table.add_row("MD5 Pattern", f"{MD5_PATTERN[:30]}...")
+    table.add_row("Image Key Pattern", f"{MD5_PATTERN[:30]}...")
     table.add_row("Hook Strategy", "Inline Hook (Trampoline) + Stack Spoofing")
     table.add_row("IPC Method", "Shared Memory Polling (No injected threads)")
-    table.add_row("Bypass Tech", "Dynamic 90 NOP skipping for MD5 CALL alignment")
 
     panel = Panel(table, title=title, border_style="blue", padding=(1, 2))
     console.print(panel)
@@ -72,7 +70,7 @@ def display_captured_data(data_type, data_value):
         title = "🔑 成功捕获: 数据库解密密钥 (DB Key)"
         color = "green"
     else:
-        title = "📦 成功捕获: 登录校验值 (MD5)"
+        title = "📦 成功捕获: 图片解密密钥 (MD5)"
         color = "yellow"
 
     content = f"[{color} bold]{data_value}[/]\n\n[dim]你现在可以使用此数据进行后续操作。[/]"
@@ -106,7 +104,7 @@ def main():
     console.print("\n[bold green]✅ Hook 系统已启动并挂载！[/bold green]")
     console.print("[cyan]原理说明:[/cyan]")
     console.print("  1. [dim]已在目标内存开辟共享内存区用于 IPC 通信。[/dim]")
-    console.print("  2. [dim]MD5 Hook 已智能越过可能的 `90 NOP` 对齐指令，精准捕获 RAX 返回值。[/dim]")
+    console.print("  2. [dim]已精准定位核心函数，拦截相关寄存器参数。[/dim]")
     console.print("  3. [dim]当前处于轮询等待状态，请在微信中执行【登录】或【解锁】操作触发函数。[/dim]\n")
 
     # 记录是否已经抓到数据
@@ -121,10 +119,8 @@ def main():
                 # -----------------------------------------------------------
                 # 2. 轮询内部日志
                 # -----------------------------------------------------------
-                # 暂停一下动画，打印日志后再恢复
                 msg, level = wx_key.get_status_message()
                 while msg is not None:
-                    # 停止动画以避免输出错乱
                     live.stop()
                     if level == 0:
                         console.print(f"[dim cyan][*] Backend:[/dim cyan] {msg}")
@@ -132,13 +128,12 @@ def main():
                         console.print(f"[bold green][+] Backend:[/bold green] {msg}")
                     elif level == 2:
                         console.print(f"[bold red][!] Backend ERROR:[/bold red] {msg}")
-                    live.start()  # 恢复动画
+                    live.start()
                     msg, level = wx_key.get_status_message()
 
                 # -----------------------------------------------------------
                 # 3. 轮询 Hook 截获的数据
                 # -----------------------------------------------------------
-                # 返回的是一个字典：{'key': '...', 'md5': '...'} 或 None
                 result = wx_key.poll_key_data()
 
                 if result:
@@ -152,10 +147,10 @@ def main():
                         display_captured_data("md5", result['md5'])
                         captured_md5 = True
 
+                    # 当两个密钥都拿到后，直接退出循环，准备卸载 Hook
                     if captured_key and captured_md5:
-                        console.print("\n[bold green]🎉 恭喜！双重数据已全部收集完毕！[/bold green]")
-                        # 你可以在这里选择 break 退出，或者继续监听
-                        # break
+                        console.print("\n[bold green]🎉 恭喜！数据库密钥与图片密钥已全部收集完毕！[/bold green]")
+                        break
 
                     live.start()  # 恢复加载动画
 
