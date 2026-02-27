@@ -240,22 +240,21 @@ void IPCManager::ListeningLoop() {
         );
         
         if (readResult && bytesRead == sizeof(SharedKeyData)) {
-            // 检查是否有新数据（通过序列号判断）
-            if (keyData.dataSize > 0 && 
-                keyData.dataSize <= 32 && 
-                keyData.md5Size <= 32 &&
-                keyData.md5Size > 0 &&
+            bool isNewKey = (keyData.dataSize > 0 && keyData.dataSize <= 32);
+            bool isNewMd5 = (keyData.md5Size > 0 && keyData.md5Size <= 64); // MD5 长度上限改为 64
+
+            if ((isNewKey || isNewMd5) &&
                 keyData.sequenceNumber != lastSequenceNumber &&
                 keyData.sequenceNumber != 0) {
-                
+
                 // 更新序列号
                 lastSequenceNumber = keyData.sequenceNumber;
-                
+
                 // 调用回调函数
                 if (dataCallback) {
                     dataCallback(keyData);
                 }
-                
+
                 // 清空远程缓冲区（防止重复读取）
                 SharedKeyData zeroData;
                 ZeroMemory(&zeroData, sizeof(zeroData));

@@ -81,12 +81,18 @@ namespace X64Disasm {
                 return len + 1; // 简化处理
                 
             // LEA
-            case 0x8D:
+            case 0x8D: {
                 len++; // ModRM
-                if ((code[len-1] & 0x07) == 4) len++; // SIB
-                if (((code[len-1] >> 6) & 3) == 2) len += 4; // disp32
+                BYTE modrm = code[len - 1];
+                BYTE mod = (modrm >> 6) & 3;
+                BYTE rm = modrm & 7;
+
+                if (rm == 4) len++; // 有SIB字节
+                if (mod == 1) len += 1; // disp8
+                else if (mod == 2) len += 4; // disp32
                 return len;
-                
+            }
+
             default:
                 // 未知指令，返回最小长度
                 return len + 1;
@@ -260,16 +266,26 @@ std::vector<BYTE> RemoteHooker::GenerateJumpInstruction(uintptr_t from, uintptr_
         jmp.push_back((BYTE)((offset32 >> 24) & 0xFF));
     }
     else {
-        // 使用14字节长跳转
-        // mov rax, addr64
-        jmp.push_back(0x48);
-        jmp.push_back(0xB8);
+        //// 使用14字节长跳转
+        //// mov rax, addr64
+        //jmp.push_back(0x48);
+        //jmp.push_back(0xB8);
+        //for (int i = 0; i < 8; i++) {
+        //    jmp.push_back((BYTE)((to >> (i * 8)) & 0xFF));
+        //}
+        //// jmp rax
+        //jmp.push_back(0xFF);
+        //jmp.push_back(0xE0);
+
+        jmp.push_back(0x49);
+        jmp.push_back(0xBB);
         for (int i = 0; i < 8; i++) {
             jmp.push_back((BYTE)((to >> (i * 8)) & 0xFF));
         }
-        // jmp rax
+
+        jmp.push_back(0x41);
         jmp.push_back(0xFF);
-        jmp.push_back(0xE0);
+        jmp.push_back(0xE3);
     }
     
     return jmp;

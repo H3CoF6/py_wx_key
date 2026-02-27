@@ -179,7 +179,6 @@ std::vector<BYTE> ShellcodeBuilder::BuildMd5HookShellcode(const ShellcodeConfig&
         };
 
     if (enableStackSpoofing) {
-        // [复用你原有的伪栈保存代码]
         code.push(code.rax); code.push(code.r10); code.push(code.r11);
         code.lea(code.rax, code.ptr[code.rsp + 24]);
         code.mov(code.rsp, spoofStackAligned);
@@ -193,18 +192,19 @@ std::vector<BYTE> ShellcodeBuilder::BuildMd5HookShellcode(const ShellcodeConfig&
 
     emitSaveRegs();
 
-    // ===== 获取 MD5 =====
-    // 执行完 Call 后，MD5 字符串（32字节 ASCII）的指针在 RAX 中
-    code.test(code.rax, code.rax); // 防崩溃校验
+    code.test(code.rcx, code.rcx); // 防崩溃校验
     code.jz(skipCopy);
 
-    // 拷贝 32 字节 MD5 字符串到共享内存
+    // 拷贝 64 字节明文字符串到共享内存
     code.mov(code.rdx, (uint64_t)config.sharedMemoryAddress);
     code.mov(code.rdi, code.rdx);
-    code.mov(code.dword[code.rdi + static_cast<uint32_t>(kSharedMd5SizeOffset)], 32);   // md5Size = 32
+    code.mov(code.dword[code.rdi + static_cast<uint32_t>(kSharedMd5SizeOffset)], 64);   // 告诉C++传了64字节
     code.add(code.rdi, static_cast<uint32_t>(kSharedMd5BufferOffset));                 // rdi -> md5Buffer
-    code.mov(code.rsi, code.rax);                  // rsi = 源地址 (rax)
-    code.mov(code.rcx, 32);                        // count = 32
+    code.mov(code.rsi, code.rcx);                  // rsi = 源地址 (rcx)
+
+    // 注意：rep movsb 会消耗 rcx，但因为刚才我们 emitSaveRegs 压过栈了，
+    // 后面 emitRestoreRegs 会自动还原原始的 rcx，所以随便用不影响原程序！
+    code.mov(code.rcx, 64);                        // 拷贝 64 个字节
     code.rep();
     code.movsb();                                  // rep movsb
 
@@ -222,8 +222,8 @@ std::vector<BYTE> ShellcodeBuilder::BuildMd5HookShellcode(const ShellcodeConfig&
     }
 
     // ===== 跳回 Trampoline =====
-    code.mov(code.rax, (uint64_t)config.trampolineAddress);
-    code.jmp(code.rax);
+    code.mov(code.r11, (uint64_t)config.trampolineAddress);
+    code.jmp(code.r11);
 
     shellcode.assign(code.getCode(), code.getCode() + code.getSize());
     return shellcode;

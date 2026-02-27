@@ -6,6 +6,8 @@
 #include <memory>
 #include <vector>
 #include <algorithm> // 包含 min
+#include <wincrypt.h>
+#pragma comment(lib, "advapi32.lib")
 
 #include "../include/hook_controller.h"
 #include "../include/syscalls.h"
@@ -129,28 +131,73 @@ namespace {
         SendStatus(error, 2);
     }
 
+    std::string CalculateMD5(const char* data, DWORD length) {
+        HCRYPTPROV hProv = 0;
+        HCRYPTHASH hHash = 0;
+        std::string md5Str = "";
+
+        if (CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
+            if (CryptCreateHash(hProv, CALG_MD5, 0, 0, &hHash)) {
+                if (CryptHashData(hHash, (const BYTE*)data, length, 0)) {
+                    DWORD hashLen = 16;
+                    BYTE buffer[16];
+                    if (CryptGetHashParam(hHash, HP_HASHVAL, buffer, &hashLen, 0)) {
+                        char hex[33];
+                        for (int i = 0; i < 16; i++) {
+                            sprintf_s(hex + i * 2, 33, "%02x", buffer[i]);
+                        }
+                        md5Str = hex;
+                    }
+                }
+                CryptDestroyHash(hHash);
+            }
+            CryptReleaseContext(hProv, 0);
+        }
+        return md5Str;
+    }
+
     void OnDataReceived(const SharedKeyData& data) {
         bool updated = false;
-        if (g_ctx.csInitialized) EnterCriticalSection(&g_ctx.dataLock);
 
+        // --- Key 的逻辑保持不变 ---
         if (data.dataSize == 32) {
             std::stringstream ss;
             ss << std::hex << std::setfill('0');
             for (DWORD i = 0; i < data.dataSize; i++) ss << std::setw(2) << static_cast<int>(data.keyBuffer[i]);
+
+            if (g_ctx.csInitialized) EnterCriticalSection(&g_ctx.dataLock);
             g_ctx.pendingKeyData = ss.str();
             g_ctx.hasNewKey = true;
             updated = true;
+            if (g_ctx.csInitialized) LeaveCriticalSection(&g_ctx.dataLock);
         }
 
-        if (data.md5Size == 32) {
-            std::string md5Str(reinterpret_cast<const char*>(data.md5Buffer), 32);
-            g_ctx.pendingMd5Data = md5Str;
-            g_ctx.hasNewMd5 = true;
-            updated = true;
+        // --- MD5 逻辑变动：收到明文，本地哈希，对 Python 隐藏 ---
+        if (data.md5Size == 64) {
+            char rawStr[65] = { 0 };
+            memcpy(rawStr, data.md5Buffer, 64);
+
+            // 计算实际的字符串长度 (遇到 \0 停止)
+            size_t actualLen = 0;
+            while (actualLen < 64 && rawStr[actualLen] != '\0') {
+                actualLen++;
+            }
+
+            if (actualLen > 0) {
+                // 仅暴露出计算完成后的 Hash，绝不暴露 rawStr
+                std::string md5Hash = CalculateMD5(rawStr, static_cast<DWORD>(actualLen));
+
+                if (g_ctx.csInitialized) EnterCriticalSection(&g_ctx.dataLock);
+                g_ctx.pendingMd5Data = md5Hash;
+                g_ctx.hasNewMd5 = true;
+                updated = true;
+                if (g_ctx.csInitialized) LeaveCriticalSection(&g_ctx.dataLock);
+            }
         }
 
-        if (g_ctx.csInitialized) LeaveCriticalSection(&g_ctx.dataLock);
-        if (updated) SendStatus("已成功接收到Hook数据", 1);
+        if (updated) {
+            SendStatus("已成功接收到Hook数据", 1);
+        }
     }
 
     std::vector<BYTE> HexStringToBytes(const std::string& hex) {
@@ -252,28 +299,18 @@ namespace {
         }
         uintptr_t keyAddress = keyResults[0] + keyOffset;
 
+        // --- 2. 定位并安装 MD5 Hook ---
         std::vector<BYTE> md5PatternBytes = HexStringToBytes(md5Pattern);
         std::vector<uintptr_t> md5Results = scanner.FindAllPatterns(moduleInfo, md5PatternBytes.data(), md5Mask);
         if (md5Results.size() != 1) {
             SetLastError("MD5 特征码匹配失败");
-            CleanupContext(); return false;
+            CleanupContext();
+            return false;
         }
 
-        uintptr_t md5CallAddr = md5Results[0] + md5Offset;
-        BYTE callOp = 0;
-        scanner.ReadRemoteMemory(md5CallAddr, &callOp, 1);
-        if (callOp != 0xE8) {
-            SetLastError("MD5特征定位的指令不是 CALL (0xE8)");
-            CleanupContext(); return false;
-        }
-
-        uintptr_t md5HookAddress = md5CallAddr + 5;
-        BYTE nextOp = 0;
-        scanner.ReadRemoteMemory(md5HookAddress, &nextOp, 1);
-        if (nextOp == 0x90) {
-            md5HookAddress += 1;
-            SendStatus("检测到 90 NOP 填充，已自动修正 MD5 Hook 地址", 0);
-        }
+        // 我们现在直接 Hook 线性安全区 (LEA/MOV)，不需要验证 E8 也不需要处理 NOP 对齐
+        uintptr_t md5HookAddress = md5Results[0] + md5Offset;
+        SendStatus("MD5 Hook 地址定位成功 (纯净数据区)", 0);
 
         if (!g_ctx.remoteData.allocate(g_ctx.hProcess, sizeof(SharedKeyData), PAGE_READWRITE)) {
             SetLastError("分配远程数据缓冲区失败");
@@ -329,6 +366,7 @@ namespace {
         SendStatus("双 Hook 安装成功", 1);
         return true;
     }
+
 } // 匿名空间结束
 
 // --- 导出接口实现 ---

@@ -12,7 +12,7 @@ struct SharedKeyData {
     BYTE keyBuffer[32];       // 偏移 4：数据库密钥数据
     DWORD sequenceNumber;     // 偏移 36：序列号 (用于通知Python端更新)
     DWORD md5Size;            // 偏移 40：原始图片密钥 数据大小
-    BYTE md5Buffer[32];       // 偏移 44：原始图片密钥 数据
+    BYTE md5Buffer[64];       // 偏移 44：原始图片密钥 数据
 };
 #pragma pack(pop)
 

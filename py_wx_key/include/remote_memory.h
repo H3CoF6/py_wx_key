@@ -56,7 +56,6 @@ public:
         return true;
     }
 
-    // 2. 近战分配函数（4个参数）- 专供 Hook 蹦床和 Shellcode 使用
     bool allocate_near(HANDLE process, SIZE_T size, ULONG protect, uintptr_t targetAddress) {
         reset();
         hProcess = process;
@@ -71,12 +70,10 @@ public:
         MEMORY_BASIC_INFORMATION mbi;
         uintptr_t current = targetAddress;
 
-        // 优先向低地址方向精准扫描可用内存块
         while (current > min_addr) {
             if (VirtualQueryEx(process, (LPCVOID)current, &mbi, sizeof(mbi)) == 0) break;
 
             if (mbi.State == MEM_FREE && mbi.RegionSize >= size) {
-                // 对齐到 64KB (Windows 内存分配粒度)
                 uintptr_t alloc_addr = (uintptr_t)mbi.BaseAddress + mbi.RegionSize - size;
                 alloc_addr -= alloc_addr % 0x10000;
 
@@ -89,11 +86,9 @@ public:
                     }
                 }
             }
-            // 跳到上一个内存块
             current = (uintptr_t)mbi.BaseAddress - 1;
         }
 
-        // 如果低地址没有，向高地址方向扫描
         current = targetAddress;
         while (current < max_addr) {
             if (VirtualQueryEx(process, (LPCVOID)current, &mbi, sizeof(mbi)) == 0) break;
@@ -113,11 +108,9 @@ public:
                     }
                 }
             }
-            // 跳到下一个内存块
             current = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
         }
 
-        // 实在没有 2GB 内的空间，回退到普通随机分配
         return allocate(process, size, protect);
     }
 
