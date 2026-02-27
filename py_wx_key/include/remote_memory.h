@@ -31,26 +31,68 @@ public:
         reset();
     }
 
-    bool allocate(HANDLE process, SIZE_T size, ULONG protect) {
+    bool allocate(HANDLE process, SIZE_T size, ULONG protect, uintptr_t targetAddress) {
         reset();
         hProcess = process;
         sizeBytes = size;
         base = nullptr;
-        SIZE_T regionSize = size;
-        NTSTATUS status = IndirectSyscalls::NtAllocateVirtualMemory(
-            hProcess,
-            &base,
-            0,
-            &regionSize,
-            MEM_COMMIT | MEM_RESERVE,
-            protect
-        );
-        if (status != STATUS_SUCCESS) {
-            base = nullptr;
-            sizeBytes = 0;
-            return false;
+
+        // 定义搜索范围（正负约 2GB 内）
+        uintptr_t max_dist = 0x7FFF0000ull;
+        uintptr_t min_addr = (targetAddress > max_dist) ? targetAddress - max_dist : 0x10000;
+        uintptr_t max_addr = targetAddress + max_dist;
+
+        MEMORY_BASIC_INFORMATION mbi;
+        uintptr_t current = targetAddress;
+
+        // 1. 优先向低地址方向精准扫描可用内存块
+        while (current > min_addr) {
+            if (VirtualQueryEx(process, (LPCVOID)current, &mbi, sizeof(mbi)) == 0) break;
+
+            if (mbi.State == MEM_FREE && mbi.RegionSize >= size) {
+                // 对齐到 64KB (Windows 内存分配粒度)
+                uintptr_t alloc_addr = (uintptr_t)mbi.BaseAddress + mbi.RegionSize - size;
+                alloc_addr -= alloc_addr % 0x10000;
+
+                if (alloc_addr >= (uintptr_t)mbi.BaseAddress && alloc_addr >= min_addr) {
+                    PVOID baseAlloc = (PVOID)alloc_addr;
+                    SIZE_T regionSize = size;
+                    if (IndirectSyscalls::NtAllocateVirtualMemory(process, &baseAlloc, 0, &regionSize, MEM_COMMIT | MEM_RESERVE, protect) == STATUS_SUCCESS) {
+                        base = baseAlloc;
+                        return true;
+                    }
+                }
+            }
+            // 跳到上一个内存块
+            current = (uintptr_t)mbi.BaseAddress - 1;
         }
-        return true;
+
+        // 2. 如果低地址没有，向高地址方向扫描
+        current = targetAddress;
+        while (current < max_addr) {
+            if (VirtualQueryEx(process, (LPCVOID)current, &mbi, sizeof(mbi)) == 0) break;
+
+            if (mbi.State == MEM_FREE && mbi.RegionSize >= size) {
+                uintptr_t alloc_addr = (uintptr_t)mbi.BaseAddress;
+                if (alloc_addr % 0x10000 != 0) {
+                    alloc_addr += 0x10000 - (alloc_addr % 0x10000);
+                }
+
+                if (alloc_addr + size <= (uintptr_t)mbi.BaseAddress + mbi.RegionSize && alloc_addr <= max_addr) {
+                    PVOID baseAlloc = (PVOID)alloc_addr;
+                    SIZE_T regionSize = size;
+                    if (IndirectSyscalls::NtAllocateVirtualMemory(process, &baseAlloc, 0, &regionSize, MEM_COMMIT | MEM_RESERVE, protect) == STATUS_SUCCESS) {
+                        base = baseAlloc;
+                        return true;
+                    }
+                }
+            }
+            // 跳到下一个内存块
+            current = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+        }
+
+        // 3. 实在没有 2GB 内的空间，只能回退到远跳（几率极小）
+        return allocate(process, size, protect);
     }
 
     void reset() {

@@ -18,16 +18,16 @@ console = Console()
 
 # ================= 配置区域 =================
 # 1. 目标微信进程 PID (任务管理器中查看)
-TARGET_PID = 4516  # <--- 请修改这里！！！
+TARGET_PID = 13468
 
 # 2. DB Key 特征码 (获取数据库解密密钥)
-KEY_PATTERN = "55 41 57 41 56 56 57 53 48 83 EC 58 48 8D 6C 24 00 48 C7 45 00 FE FF FF FF 44 89 CF 44 89 C3 49 89 D6"
-KEY_MASK = "xxxxxxxxxxxxxxxx?xxxxxxxxxxxxxxxxx"
-KEY_OFFSET = 12
+KEY_PATTERN = "24 08 48 89 6c 24 10 48 89 74,00 18 48 89 7c 00 20 41 56 48 83 ec 50 41"
+KEY_MASK = "xxxxxxxxxx?xxxx?xxxxxxxx"
+KEY_OFFSET = -3
 
 MD5_PATTERN = "48 8D 4D 00 48 89 4D B0 48 89 45 B8 48 8D 7D 00 48 8D 55 B0 48 89 F9"
 MD5_MASK = "xxx?xxxxxxxxxxx?xxxxxxx"
-MD5_OFFSET = 0
+MD5_OFFSET = 23
 
 
 # ===========================================
