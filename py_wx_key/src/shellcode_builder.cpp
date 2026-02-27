@@ -7,6 +7,8 @@ namespace {
     constexpr size_t kSharedDataSizeOffset = offsetof(SharedKeyData, dataSize);
     constexpr size_t kSharedKeyBufferOffset = offsetof(SharedKeyData, keyBuffer);
     constexpr size_t kSharedSequenceOffset = offsetof(SharedKeyData, sequenceNumber);
+    constexpr size_t kSharedMd5SizeOffset = offsetof(SharedKeyData, md5Size);
+    constexpr size_t kSharedMd5BufferOffset = offsetof(SharedKeyData, md5Buffer);
 }
 
 ShellcodeBuilder::ShellcodeBuilder() {
@@ -145,6 +147,84 @@ std::vector<BYTE> ShellcodeBuilder::BuildHookShellcode(const ShellcodeConfig& co
     code.jmp(code.rax);
 
     // 输出机器码
+    shellcode.assign(code.getCode(), code.getCode() + code.getSize());
+    return shellcode;
+}
+
+std::vector<BYTE> ShellcodeBuilder::BuildMd5HookShellcode(const ShellcodeConfig& config) {
+    shellcode.clear();
+    if (sizeof(void*) != 8) return shellcode;
+
+    const bool enableStackSpoofing = config.enableStackSpoofing && config.spoofStackPointer != 0;
+    uint64_t spoofStackAligned = 0;
+    if (enableStackSpoofing) {
+        spoofStackAligned = static_cast<uint64_t>(config.spoofStackPointer) & ~static_cast<uint64_t>(0xF);
+    }
+
+    Xbyak::CodeGenerator code(1024, Xbyak::AutoGrow);
+    Xbyak::Label skipCopy;
+
+    auto emitSaveRegs = [&]() {
+        code.pushfq(); code.push(code.rax); code.push(code.rcx); code.push(code.rdx);
+        code.push(code.rbx); code.push(code.rbp); code.push(code.rsi); code.push(code.rdi);
+        code.push(code.r8); code.push(code.r9); code.push(code.r10); code.push(code.r11);
+        code.push(code.r12); code.push(code.r13); code.push(code.r14); code.push(code.r15);
+        };
+
+    auto emitRestoreRegs = [&]() {
+        code.pop(code.r15); code.pop(code.r14); code.pop(code.r13); code.pop(code.r12);
+        code.pop(code.r11); code.pop(code.r10); code.pop(code.r9); code.pop(code.r8);
+        code.pop(code.rdi); code.pop(code.rsi); code.pop(code.rbp); code.pop(code.rbx);
+        code.pop(code.rdx); code.pop(code.rcx); code.pop(code.rax); code.popfq();
+        };
+
+    if (enableStackSpoofing) {
+        // [复用你原有的伪栈保存代码]
+        code.push(code.rax); code.push(code.r10); code.push(code.r11);
+        code.lea(code.rax, code.ptr[code.rsp + 24]);
+        code.mov(code.rsp, spoofStackAligned);
+        code.sub(code.rsp, 0x20);
+        code.push(code.rax);
+        code.push(0);
+        code.mov(code.r11, code.qword[code.rax - 24]);
+        code.mov(code.r10, code.qword[code.rax - 16]);
+        code.mov(code.rax, code.qword[code.rax - 8]);
+    }
+
+    emitSaveRegs();
+
+    // ===== 获取 MD5 =====
+    // 执行完 Call 后，MD5 字符串（32字节 ASCII）的指针在 RAX 中
+    code.test(code.rax, code.rax); // 防崩溃校验
+    code.jz(skipCopy);
+
+    // 拷贝 32 字节 MD5 字符串到共享内存
+    code.mov(code.rdx, (uint64_t)config.sharedMemoryAddress);
+    code.mov(code.rdi, code.rdx);
+    code.mov(code.dword[code.rdi + static_cast<uint32_t>(kSharedMd5SizeOffset)], 32);   // md5Size = 32
+    code.add(code.rdi, static_cast<uint32_t>(kSharedMd5BufferOffset));                 // rdi -> md5Buffer
+    code.mov(code.rsi, code.rax);                  // rsi = 源地址 (rax)
+    code.mov(code.rcx, 32);                        // count = 32
+    code.rep();
+    code.movsb();                                  // rep movsb
+
+    // 递增序列号唤醒 IPC
+    code.mov(code.eax, code.dword[code.rdx + static_cast<uint32_t>(kSharedSequenceOffset)]);
+    code.inc(code.eax);
+    code.mov(code.dword[code.rdx + static_cast<uint32_t>(kSharedSequenceOffset)], code.eax);
+
+    code.L(skipCopy);
+    emitRestoreRegs();
+
+    if (enableStackSpoofing) {
+        code.add(code.rsp, 8);
+        code.pop(code.rsp);
+    }
+
+    // ===== 跳回 Trampoline =====
+    code.mov(code.rax, (uint64_t)config.trampolineAddress);
+    code.jmp(code.rax);
+
     shellcode.assign(code.getCode(), code.getCode() + code.getSize());
     return shellcode;
 }

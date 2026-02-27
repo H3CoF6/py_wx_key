@@ -6,12 +6,13 @@
 #include <functional>
 #include <atomic>
 
-// 共享内存数据结构
 #pragma pack(push, 1)
 struct SharedKeyData {
-    DWORD dataSize;           // 数据大小
-    BYTE keyBuffer[32];       // 密钥数据（最大32字节）
-    DWORD sequenceNumber;     // 序列号
+    DWORD dataSize;           // 偏移 0：数据库密钥大小
+    BYTE keyBuffer[32];       // 偏移 4：数据库密钥数据
+    DWORD sequenceNumber;     // 偏移 36：序列号 (用于通知Python端更新)
+    DWORD md5Size;            // 偏移 40：原始图片密钥 数据大小
+    BYTE md5Buffer[32];       // 偏移 44：原始图片密钥 数据
 };
 #pragma pack(pop)
 

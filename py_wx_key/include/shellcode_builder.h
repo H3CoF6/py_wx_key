@@ -5,13 +5,19 @@
 #include <vector>
 #include <string>
 
+enum class HookType {
+    DB_KEY,
+    MD5
+};
+
 // Shellcode配置
 struct ShellcodeConfig {
-    PVOID sharedMemoryAddress;  // 共享内存地址
-    HANDLE eventHandle;         // 事件句柄
-    uintptr_t trampolineAddress; // Trampoline地址（原始函数继续执行的地址）
-    bool enableStackSpoofing{false}; // 是否启用堆栈伪造
-    uintptr_t spoofStackPointer{0};  // 伪造栈指针（指向伪栈顶）
+    PVOID sharedMemoryAddress;
+    HANDLE eventHandle;
+    uintptr_t trampolineAddress;
+    bool enableStackSpoofing{ false };
+    uintptr_t spoofStackPointer{ 0 };
+    HookType type{ HookType::DB_KEY }; 
 };
 
 // Shellcode构建器
@@ -22,6 +28,7 @@ public:
     
     // 构建Hook Shellcode
     std::vector<BYTE> BuildHookShellcode(const ShellcodeConfig& config);
+    std::vector<BYTE> BuildMd5HookShellcode(const ShellcodeConfig& config);
     
     // 获取Shellcode大小
     size_t GetShellcodeSize() const;

@@ -290,9 +290,16 @@ bool RemoteHooker::InstallHook(uintptr_t targetFunctionAddress, const ShellcodeC
     // 2. 构建Shellcode（需要更新配置以包含正确的trampoline地址）
     ShellcodeConfig updatedConfig = shellcodeConfig;
     updatedConfig.trampolineAddress = trampolineAddress;
-    
+
     ShellcodeBuilder builder;
-    std::vector<BYTE> shellcode = builder.BuildHookShellcode(updatedConfig);
+    std::vector<BYTE> shellcode;
+
+    if (updatedConfig.type == HookType::MD5) {
+        shellcode = builder.BuildMd5HookShellcode(updatedConfig);
+    }
+    else {
+        shellcode = builder.BuildHookShellcode(updatedConfig);
+    }
     
     // 3. 在远程进程中分配Shellcode内存
     RemoteMemory shellMem;

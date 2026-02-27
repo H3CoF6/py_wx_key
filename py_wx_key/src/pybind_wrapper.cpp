@@ -6,36 +6,35 @@
 namespace py = pybind11;
 
 PYBIND11_MODULE(wx_key, m) {
-    m.doc() = "WeChat Key Hook Python Module (ABI3 Compatible)";
+    m.doc() = "WeChat Key Hook Python Module (Dual Hooks)";
 
-    m.def("initialize_hook", &InitializeHook, 
-          "Initialize and install the hook",
-          py::arg("target_pid"), 
-          py::arg("version") = "", 
-          py::arg("pattern"), 
-          py::arg("mask"), 
-          py::arg("offset"));
+    m.def("initialize_hook", &InitializeHook,
+        "Initialize and install the dual hooks",
+        py::arg("target_pid"),
+        py::arg("version") = "",
+        py::arg("key_pattern"), py::arg("key_mask"), py::arg("key_offset"),
+        py::arg("md5_pattern"), py::arg("md5_mask"), py::arg("md5_offset"));
 
-    m.def("poll_key_data", [](int buffer_size) -> py::object {
-        // 初始化 vector 并填零，防止乱码
-        std::vector<char> buffer(buffer_size, 0);
+    m.def("poll_key_data", []() -> py::object {
+        std::vector<char> key_buf(65, 0);
+        std::vector<char> md5_buf(33, 0);
 
-        bool success = PollKeyData(buffer.data(), buffer_size);
+        bool success = PollKeyData(key_buf.data(), 65, md5_buf.data(), 33);
 
         if (success) {
-            // 确保只转换有效字符串部分
-            return py::cast(std::string(buffer.data()));
+            py::dict result;
+            if (key_buf[0] != '\0') {
+                result["key"] = std::string(key_buf.data());
+            }
+            if (md5_buf[0] != '\0') {
+                result["md5"] = std::string(md5_buf.data());
+            }
+            return result;
         }
 
-        // 失败返回 None
         return py::none();
-        }, "Poll for new key data, returns hex string or None",
-        py::arg("buffer_size") = 65);
+        }, "Poll for new data, returns a dict {'key': '...', 'md5': '...'} or None");
 
-    // ---------------------------------------------------------
-    // 修复点：get_status_message
-    // 同样添加 -> py::object 明确返回类型
-    // ---------------------------------------------------------
     m.def("get_status_message", []() -> py::object {
         char buffer[256] = { 0 }; // 也就是初始化为0
         int level = 0;

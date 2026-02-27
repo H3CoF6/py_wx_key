@@ -18,7 +18,11 @@
  * @param offset 匹配成功后的偏移量
  * @return 成功返回true，失败返回false
  */
-HOOK_API bool InitializeHook(DWORD targetPid, const char* version, const char* pattern, const char* mask, int offset);
+HOOK_API bool InitializeHook(
+    DWORD targetPid, const char* version,
+    const char* keyPattern, const char* keyMask, int keyOffset,
+    const char* md5Pattern, const char* md5Mask, int md5Offset
+);
 
 /**
  * 轮询检查是否有新的密钥数据（非阻塞）
@@ -26,7 +30,7 @@ HOOK_API bool InitializeHook(DWORD targetPid, const char* version, const char* p
  * @param bufferSize keyBuffer的大小
  * @return 如果有新数据返回true，否则返回false
  */
-HOOK_API bool PollKeyData(char* keyBuffer, int bufferSize);
+HOOK_API bool PollKeyData(char* keyBuffer, int keyBufferSize, char* md5Buffer, int md5BufferSize);
 
 /**
  * 获取当前状态消息

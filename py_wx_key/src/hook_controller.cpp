@@ -30,13 +30,16 @@ namespace {
     struct HookContext {
         HANDLE hProcess{ nullptr };
         std::unique_ptr<IPCManager> ipc;
-        std::unique_ptr<RemoteHooker> hooker;
+        std::unique_ptr<RemoteHooker> keyHooker;   // 改名
+        std::unique_ptr<RemoteHooker> md5Hooker;
         RemoteMemory remoteData;
         RemoteMemory spoofStack;
         CRITICAL_SECTION dataLock{};
         bool csInitialized{ false };
         std::string pendingKeyData;
+        std::string pendingMd5Data;
         bool hasNewKey{ false };
+        bool hasNewMd5{ false };
         std::vector<StatusMessage> statusQueue;
         bool initialized{ false };
 
@@ -56,6 +59,8 @@ namespace {
 
         void ResetDataQueues() {
             pendingKeyData.clear();
+			pendingMd5Data.clear();
+			hasNewMd5 = false;
             hasNewKey = false;
             statusQueue.clear();
         }
@@ -123,20 +128,29 @@ namespace {
     }
 
     void OnDataReceived(const SharedKeyData& data) {
-        if (data.dataSize != 32) {
-            SendStatus("收到的密钥数据长度不正确", 2);
-            return;
-        }
-        std::stringstream ss;
-        ss << std::hex << std::setfill('0');
-        for (DWORD i = 0; i < data.dataSize; i++) ss << std::setw(2) << static_cast<int>(data.keyBuffer[i]);
-        std::string keyHex = ss.str();
+        bool updated = false;
         if (g_ctx.csInitialized) EnterCriticalSection(&g_ctx.dataLock);
-        g_ctx.pendingKeyData = keyHex;
-        g_ctx.hasNewKey = true;
+
+        if (data.dataSize == 32) {
+            std::stringstream ss;
+            ss << std::hex << std::setfill('0');
+            for (DWORD i = 0; i < data.dataSize; i++) ss << std::setw(2) << static_cast<int>(data.keyBuffer[i]);
+            g_ctx.pendingKeyData = ss.str();
+            g_ctx.hasNewKey = true;
+            updated = true;
+        }
+
+        if (data.md5Size == 32) {
+            std::string md5Str(reinterpret_cast<const char*>(data.md5Buffer), 32);
+            g_ctx.pendingMd5Data = md5Str;
+            g_ctx.hasNewMd5 = true;
+            updated = true;
+        }
+
         if (g_ctx.csInitialized) LeaveCriticalSection(&g_ctx.dataLock);
-        SendStatus("已成功接收到密钥", 1);
+        if (updated) SendStatus("已成功接收到Hook数据", 1);
     }
+}
 
     std::vector<BYTE> HexStringToBytes(const std::string& hex) {
         std::vector<BYTE> bytes;
@@ -154,7 +168,11 @@ namespace {
 }
 
 namespace {
-    bool InitializeContext(DWORD targetPid, const char* version, const char* pattern, const char* mask, int offset) {
+    bool InitializeContext(
+        DWORD targetPid, const char* version,
+        const char* keyPattern, const char* keyMask, int keyOffset,
+        const char* md5Pattern, const char* md5Mask, int md5Offset) {
+
         if (g_ctx.initialized) {
             SetLastError("Hook已经初始化");
             return false;
@@ -212,21 +230,38 @@ namespace {
             return false;
         }
 
-        std::vector<BYTE> patternBytes = HexStringToBytes(pattern);
-        std::vector<uintptr_t> results = scanner.FindAllPatterns(moduleInfo, patternBytes.data(), mask);
+        std::vector<BYTE> keyPatternBytes = HexStringToBytes(keyPattern);
+        std::vector<uintptr_t> keyResults = scanner.FindAllPatterns(moduleInfo, keyPatternBytes.data(), keyMask);
+        if (keyResults.size() != 1) {
+            SetLastError("DB Key 特征码匹配失败");
+            CleanupContext(); return false;
+        }
+        uintptr_t keyAddress = keyResults[0] + keyOffset;
 
-        if (results.size() != 1) {
-            std::stringstream ss;
-            ss << "模式匹配失败，找到 " << results.size() << " 个结果";
-            SetLastError(ss.str());
-            CleanupContext();
-            return false;
+        // --- 获取 MD5 Call 地址并动态越过 NOP ---
+        std::vector<BYTE> md5PatternBytes = HexStringToBytes(md5Pattern);
+        std::vector<uintptr_t> md5Results = scanner.FindAllPatterns(moduleInfo, md5PatternBytes.data(), md5Mask);
+        if (md5Results.size() != 1) {
+            SetLastError("MD5 特征码匹配失败");
+            CleanupContext(); return false;
         }
 
-        uintptr_t targetFunctionAddress = results[0] + offset;
-        std::stringstream addrMsg;
-        addrMsg << "目标函数地址: 0x" << std::hex << targetFunctionAddress;
-        SendStatus(addrMsg.str(), 0);
+        uintptr_t md5CallAddr = md5Results[0] + md5Offset;
+        BYTE callOp = 0;
+        scanner.ReadRemoteMemory(md5CallAddr, &callOp, 1);
+        if (callOp != 0xE8) {
+            SetLastError("MD5特征定位的指令不是 CALL (0xE8)");
+            CleanupContext(); return false;
+        }
+
+        // 定位到 CALL 执行完的下一条指令
+        uintptr_t md5HookAddress = md5CallAddr + 5;
+        BYTE nextOp = 0;
+        scanner.ReadRemoteMemory(md5HookAddress, &nextOp, 1);
+        if (nextOp == 0x90) { // 动态适配 NOP 对齐
+            md5HookAddress += 1;
+            SendStatus("检测到 90 NOP 填充，已自动修正 MD5 Hook 地址", 0);
+        }
 
         // 5. 分配远程资源
         if (!g_ctx.remoteData.allocate(g_ctx.hProcess, sizeof(SharedKeyData), PAGE_READWRITE)) {
@@ -259,23 +294,34 @@ namespace {
             return false;
         }
 
-        // 7. 安装Hook
-        g_ctx.hooker = std::make_unique<RemoteHooker>(g_ctx.hProcess);
-        ShellcodeConfig shellcodeConfig{};
-        shellcodeConfig.sharedMemoryAddress = g_ctx.remoteData.get();
-        shellcodeConfig.enableStackSpoofing = true;
-        shellcodeConfig.spoofStackPointer = spoofStackTop;
+        // --- 安装 DB Key Hook ---
+        g_ctx.keyHooker = std::make_unique<RemoteHooker>(g_ctx.hProcess);
+        ShellcodeConfig keyConfig{};
+        keyConfig.sharedMemoryAddress = g_ctx.remoteData.get();
+        keyConfig.enableStackSpoofing = true;
+        keyConfig.spoofStackPointer = spoofStackTop;
+        keyConfig.type = HookType::DB_KEY;
+        if (!g_ctx.keyHooker->InstallHook(keyAddress, keyConfig)) {
+            SetLastError("安装 DB Key Hook 失败");
+            CleanupContext(); return false;
+        }
 
-        if (!g_ctx.hooker->InstallHook(targetFunctionAddress, shellcodeConfig)) {
-            SetLastError(FormatWin32Error("安装Hook失败", GetLastError()));
-            CleanupContext();
-            return false;
+        // --- 安装 MD5 Hook ---
+        g_ctx.md5Hooker = std::make_unique<RemoteHooker>(g_ctx.hProcess);
+        ShellcodeConfig md5Config = keyConfig;
+        md5Config.type = HookType::MD5;
+        md5Config.spoofStackPointer = spoofStackTop - 0x1000; // 为第二个Hook分配另一块伪栈区域
+
+        if (!g_ctx.md5Hooker->InstallHook(md5HookAddress, md5Config)) {
+            SetLastError("安装 MD5 Hook 失败");
+            CleanupContext(); return false;
         }
 
         g_ctx.initialized = true;
-        SendStatus("Hook安装成功", 1);
+        SendStatus("双 Hook 安装成功", 1);
         return true;
     }
+}
 
     void CleanupContext() {
         if (g_ctx.hooker) { g_ctx.hooker->UninstallHook(); g_ctx.hooker.reset(); }
@@ -304,20 +350,33 @@ HOOK_API bool CleanupHook() {
     return true;
 }
 
-HOOK_API bool PollKeyData(char* keyBuffer, int bufferSize) {
-    if (!g_ctx.initialized || !keyBuffer || bufferSize < 65) return false;
+HOOK_API bool PollKeyData(char* keyBuffer, int keyBufferSize, char* md5Buffer, int md5BufferSize) {
+    if (!g_ctx.initialized) return false;
     if (g_ctx.csInitialized) EnterCriticalSection(&g_ctx.dataLock);
-    if (!g_ctx.hasNewKey) {
-        if (g_ctx.csInitialized) LeaveCriticalSection(&g_ctx.dataLock);
-        return false;
+
+    bool hasAnyData = false;
+
+    if (keyBuffer && keyBufferSize > 0) keyBuffer[0] = '\0';
+    if (md5Buffer && md5BufferSize > 0) md5Buffer[0] = '\0';
+
+    if (g_ctx.hasNewKey && keyBuffer && keyBufferSize >= 65) {
+        size_t len = min(g_ctx.pendingKeyData.length(), (size_t)keyBufferSize - 1);
+        memcpy(keyBuffer, g_ctx.pendingKeyData.c_str(), len);
+        keyBuffer[len] = '\0';
+        g_ctx.hasNewKey = false;
+        hasAnyData = true;
     }
-    size_t copyLen = (g_ctx.pendingKeyData.length() < (size_t)bufferSize - 1) ? g_ctx.pendingKeyData.length() : (size_t)bufferSize - 1;
-    memcpy(keyBuffer, g_ctx.pendingKeyData.c_str(), copyLen);
-    keyBuffer[copyLen] = '\0';
-    g_ctx.hasNewKey = false;
-    g_ctx.pendingKeyData.clear();
+
+    if (g_ctx.hasNewMd5 && md5Buffer && md5BufferSize >= 33) {
+        size_t len = min(g_ctx.pendingMd5Data.length(), (size_t)md5BufferSize - 1);
+        memcpy(md5Buffer, g_ctx.pendingMd5Data.c_str(), len);
+        md5Buffer[len] = '\0';
+        g_ctx.hasNewMd5 = false;
+        hasAnyData = true;
+    }
+
     if (g_ctx.csInitialized) LeaveCriticalSection(&g_ctx.dataLock);
-    return true;
+    return hasAnyData;
 }
 
 HOOK_API bool GetStatusMessage(char* statusBuffer, int bufferSize, int* outLevel) {

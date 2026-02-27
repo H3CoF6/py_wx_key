@@ -243,6 +243,8 @@ void IPCManager::ListeningLoop() {
             // 检查是否有新数据（通过序列号判断）
             if (keyData.dataSize > 0 && 
                 keyData.dataSize <= 32 && 
+                keyData.md5Size <= 32 &&
+                keyData.md5Size > 0 &&
                 keyData.sequenceNumber != lastSequenceNumber &&
                 keyData.sequenceNumber != 0) {
                 
