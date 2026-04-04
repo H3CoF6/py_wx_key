@@ -26,14 +26,14 @@ MD5_OFFSET = 4
 
 def get_wechat_pid():
     for proc in psutil.process_iter(['pid', 'name']):
-        if proc.info['name'].lower() == 'wechat.exe':
+        if proc.info['name'].lower() == 'weixin.exe':
             return proc.info['pid']
     return None
 
 def main():
     pid = get_wechat_pid()
     if not pid:
-        console.print("[bold red]❌ 未找到运行中的 WeChat.exe 进程。[/bold red]")
+        console.print("[bold red]❌ 未找到运行中的 WeXin.exe 进程。[/bold red]")
         return
 
     title = Text("WeChat All-in-One Key Capture Demo", justify="center", style="bold magenta")
@@ -61,8 +61,8 @@ def main():
     if wx_key.initialize_hook(pid):
         console.print("[green]✅ 数据库密钥 Hook 已安装成功。[/green]")
         # 轮询一会儿看看能不能拿到
-        console.print("[dim]等待 3 秒轮询数据库密钥 (请在微信执行操作)...[/dim]")
-        for _ in range(30):
+        console.print("[dim]轮询数据库密钥 (请在微信执行登录操作)...[/dim]")
+        while True:
             res = wx_key.poll_key_data()
             if res and 'key' in res:
                 console.print(Panel(f"[green bold]{res['key']}[/]", title="🔑 捕获: 数据库密钥"))
@@ -73,37 +73,37 @@ def main():
         console.print(f"[red]❌ 初始化失败: {wx_key.get_last_error_msg()}[/red]")
 
     # 3. 演示【双路 Hook 模式】(全参数调用)
-    console.print(f"\n[bold yellow][3/3] 正在初始化双路 Hook (数据库自动 + 图片手动特征码)...[/bold yellow]")
-    if wx_key.initialize_hook(pid, MD5_PATTERN, MD5_MASK, MD5_OFFSET):
-        console.print("[green]✅ 双路 Hook 已安装成功。[/green]")
-        try:
-            with Live(Spinner("dots", text="等待触发 Hook (按 Ctrl+C 退出)...", style="magenta"), refresh_per_second=10) as live:
-                while True:
-                    # 打印后台日志
-                    msg, level = wx_key.get_status_message()
-                    while msg:
-                        live.stop()
-                        console.print(f"[*] Backend: {msg}")
-                        live.start()
-                        msg, level = wx_key.get_status_message()
-                    
-                    # 轮询捕获
-                    res = wx_key.poll_key_data()
-                    if res:
-                        live.stop()
-                        if 'key' in res:
-                            console.print(Panel(f"[green bold]{res['key']}[/]", title="🔑 捕获: DB Key"))
-                        if 'md5' in res:
-                            console.print(Panel(f"[yellow bold]{res['md5']}[/]", title="📦 捕获: Image Hook Data"))
-                        live.start()
-                    time.sleep(0.1)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            wx_key.cleanup_hook()
-            console.print("[bold green]✅ Hook 已卸载。[/bold green]")
-    else:
-        console.print(f"[red]❌ 双路初始化失败: {wx_key.get_last_error_msg()}[/red]")
+    # console.print(f"\n[bold yellow][3/3] 正在初始化双路 Hook (数据库自动 + 图片手动特征码)...[/bold yellow]")
+    # if wx_key.initialize_hook(pid, MD5_PATTERN, MD5_MASK, MD5_OFFSET):
+    #     console.print("[green]✅ 双路 Hook 已安装成功。[/green]")
+    #     try:
+    #         with Live(Spinner("dots", text="等待触发 Hook (按 Ctrl+C 退出)...", style="magenta"), refresh_per_second=10) as live:
+    #             while True:
+    #                 # 打印后台日志
+    #                 msg, level = wx_key.get_status_message()
+    #                 while msg:
+    #                     live.stop()
+    #                     console.print(f"[*] Backend: {msg}")
+    #                     live.start()
+    #                     msg, level = wx_key.get_status_message()
+    #
+    #                 # 轮询捕获
+    #                 res = wx_key.poll_key_data()
+    #                 if res:
+    #                     live.stop()
+    #                     if 'key' in res:
+    #                         console.print(Panel(f"[green bold]{res['key']}[/]", title="🔑 捕获: DB Key"))
+    #                     if 'md5' in res:
+    #                         console.print(Panel(f"[yellow bold]{res['md5']}[/]", title="📦 捕获: Image Hook Data"))
+    #                     live.start()
+    #                 time.sleep(0.1)
+    #     except KeyboardInterrupt:
+    #         pass
+    #     finally:
+    #         wx_key.cleanup_hook()
+    #         console.print("[bold green]✅ Hook 已卸载。[/bold green]")
+    # else:
+    #     console.print(f"[red]❌ 双路初始化失败: {wx_key.get_last_error_msg()}[/red]")
 
 if __name__ == "__main__":
     main()
