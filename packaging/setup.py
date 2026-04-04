@@ -6,7 +6,7 @@ class BinaryDistribution(Distribution):
 
 setup(
     name='wx_key',
-    version='1.1.0',
+    version='2.0.0',
     description='WeChat Key Hook',
     packages=find_packages(),
     package_data={
