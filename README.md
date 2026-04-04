@@ -1,6 +1,6 @@
 # py_wx_key (Python Extension - Hybrid Mode)
 
-**py_wx_key** 是一个用于获取微信核心密钥的 Python 原生扩展模块（.pyd）。它支持**自动扫描数据库密钥**、**手动/自动获取图片密钥**。
+**py_wx_key** 是一个用于获取微信核心密钥的 Python 原生扩展模块（.pyd）。它支持**自动扫描数据库密钥**、**手动/自动获取图片密钥**。（大量实现参考： [wx_key](https://github.com/ycccccccy/wx_key)）
 
 ------
 
