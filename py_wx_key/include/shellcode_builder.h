@@ -1,10 +1,11 @@
-﻿#ifndef SHELLCODE_BUILDER_H
+#ifndef SHELLCODE_BUILDER_H
 #define SHELLCODE_BUILDER_H
 
 #include <Windows.h>
 #include <vector>
 #include <string>
 
+// Hook类型
 enum class HookType {
     DB_KEY,
     MD5
@@ -17,7 +18,7 @@ struct ShellcodeConfig {
     uintptr_t trampolineAddress;
     bool enableStackSpoofing{ false };
     uintptr_t spoofStackPointer{ 0 };
-    HookType type{ HookType::DB_KEY }; 
+    HookType type{ HookType::DB_KEY };
 };
 
 // Shellcode构建器
@@ -41,4 +42,3 @@ private:
 };
 
 #endif // SHELLCODE_BUILDER_H
-
