@@ -1,5 +1,7 @@
 import sys
 import time
+import json
+import psutil
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -15,62 +17,78 @@ except ImportError:
 
 console = Console()
 
-# ================= 配置区域 =================
-TARGET_PID = 29260
+def get_wechat_pid():
+    for proc in psutil.process_iter(['pid', 'name']):
+        if proc.info['name'].lower() == 'wechat.exe':
+            return proc.info['pid']
+    return None
 
-KEY_PATTERN = "24 08 48 89 6c 24 10 48 89 74 00 18 48 89 7c 00 20 41 56 48 83 ec 50 41"
-KEY_MASK = "xxxxxxxxxx?xxxx?xxxxxxxx"
-KEY_OFFSET = -3
-
-MD5_PATTERN = "48 8D 4D 00 48 89 4D B0 48 89 45 B8 48 8D 7D 00 48 8D 55 B0 48 89 F9"
-MD5_MASK = "xxx?xxxxxxxxxxx?xxxxxxx"
-MD5_OFFSET = 4
-
-
-# ===========================================
-
-def print_header():
-    title = Text("WeChat Dual-Hook System (DB Key + Image Key)", justify="center", style="bold magenta")
+def print_header(pid):
+    title = Text("WeChat Hook System (Auto Scanning)", justify="center", style="bold magenta")
     table = Table(show_header=False, expand=True, border_style="cyan")
     table.add_column("Property", style="bold cyan", width=20)
     table.add_column("Value", style="green")
-    table.add_row("Target PID", str(TARGET_PID))
-    table.add_row("DB Key Pattern", f"{KEY_PATTERN[:30]}...")
-    table.add_row("Image Key Pattern", f"{MD5_PATTERN[:30]}...")
-    table.add_row("Hook Strategy", "Inline Hook (Trampoline) + Stack Spoofing")
-    table.add_row("IPC Method", "Shared Memory Polling (No injected threads)")
+    table.add_row("Target PID", str(pid))
+    table.add_row("Mode", "Auto Scanning (No manual patterns)")
+    table.add_row("Hook Strategy", "Inline Hook + Stack Spoofing")
+    table.add_row("Image Key", "Local File Extraction (MMKV/Statistic)")
     console.print(Panel(table, title=title, border_style="blue", padding=(1, 2)))
 
-
-def display_captured_data(data_type, data_value):
-    if data_type == "key":
-        title = "🔑 成功捕获: 数据库解密密钥 (DB Key)"
-        color = "green"
-        content = f"[{color} bold]{data_value}[/]\n\n[dim]用于解密 .db 数据库文件。[/]"
-    else:
-        title = "📦 成功捕获: 图片解密参数 (Image Key)"
-        color = "yellow"
-        # 分割 C++ 传回来的 "MD5_16位|XOR密钥"
-        md5_16, xor_key = data_value.split('|')
-        content = (f"[{color} bold]MD5 (16位):[/] {md5_16}\n"
-                   f"[{color} bold]异或密钥 (XOR):[/] {xor_key}\n\n"
-                   f"[dim]用于解密 .dat 图片文件 (利用 XOR 密钥进行异或还原)。[/]")
-
+def display_captured_key(key):
+    title = "🔑 成功捕获: 数据库解密密钥 (DB Key)"
+    color = "green"
+    content = f"[green bold]{key}[/]\n\n[dim]用于解密 .db 数据库文件。[/]"
     console.print(Panel(content, title=title, border_style=color, expand=False))
 
+def display_image_keys():
+    console.print("\n[bold yellow][*] 正在扫描本地文件提取图片密钥...[/bold yellow]")
+    img_key_json = wx_key.get_image_key()
+    if img_key_json:
+        try:
+            data = json.loads(img_key_json)
+            title = "📦 本地提取: 图片解密参数 (Image Keys)"
+            
+            table = Table(show_header=True, header_style="bold magenta", border_style="yellow")
+            table.add_column("微信ID (wxid)", style="cyan")
+            table.add_column("唯一码 (Code)", style="dim")
+            table.add_column("XOR 密钥", style="bold yellow")
+            table.add_column("AES 密钥 (16位)", style="bold green")
+            
+            for account in data.get('accounts', []):
+                wxid = account.get('wxid', 'unknown')
+                for k in account.get('keys', []):
+                    table.add_row(
+                        wxid, 
+                        str(k.get('code')), 
+                        str(k.get('xorKey')), 
+                        k.get('aesKey')
+                    )
+            
+            console.print(Panel(table, title=title, border_style="yellow", padding=(1, 1)))
+        except Exception as e:
+            console.print(f"[bold red]❌ 解析图片密钥 JSON 失败: {e}[/bold red]")
+    else:
+        console.print("[bold red]❌ 未能提取到图片密钥信息。[/bold red]")
 
 def main():
-    print_header()
-    console.print("\n[bold yellow][*] 正在向目标进程注入双 Hook...[/bold yellow]")
+    target_pid = get_wechat_pid()
+    if not target_pid:
+        console.print("[bold red]❌ 未找到运行中的 WeChat.exe 进程。[/bold red]")
+        return
 
-    success = wx_key.initialize_hook(
-        TARGET_PID, "", KEY_PATTERN, KEY_MASK, KEY_OFFSET, MD5_PATTERN, MD5_MASK, MD5_OFFSET
-    )
+    print_header(target_pid)
+    
+    # 1. 显示图片密钥 (本地文件提取，不需要 Hook)
+    display_image_keys()
 
+    # 2. 初始化数据库密钥 Hook
+    console.print(f"\n[bold yellow][*] 正在向目标进程 {target_pid} 注入 Hook (数据库密钥)...[/bold yellow]")
+    success = wx_key.initialize_hook(target_pid)
+
+    # 打印后台初始化日志
     msg, level = wx_key.get_status_message()
     while msg is not None:
-        console.print(
-            f"[{'dim cyan' if level == 0 else 'bold green' if level == 1 else 'bold red'}][*] Backend:[/] {msg}")
+        console.print(f"[{'dim cyan' if level == 0 else 'bold green' if level == 1 else 'bold red'}][*] Backend:[/] {msg}")
         msg, level = wx_key.get_status_message()
 
     if not success:
@@ -79,37 +97,27 @@ def main():
 
     console.print("\n[bold green]✅ Hook 系统已启动并挂载！请在微信中执行登录或解锁操作。[/bold green]\n")
 
-    captured_key = False
-    captured_md5 = False
-
     try:
         with Live(Spinner("dots", text="等待触发 Hook... (按 Ctrl+C 退出)", style="magenta"),
                   refresh_per_second=10) as live:
             while True:
+                # 实时显示后台日志
                 msg, level = wx_key.get_status_message()
                 while msg is not None:
                     live.stop()
-                    console.print(
-                        f"[{'dim cyan' if level == 0 else 'bold green' if level == 1 else 'bold red'}][*] Backend:[/] {msg}")
+                    console.print(f"[{'dim cyan' if level == 0 else 'bold green' if level == 1 else 'bold red'}][*] Backend:[/] {msg}")
                     live.start()
                     msg, level = wx_key.get_status_message()
 
+                # 轮询数据库密钥
                 result = wx_key.poll_key_data()
-                if result:
+                if result and 'key' in result:
                     live.stop()
-                    if 'key' in result:
-                        display_captured_data("key", result['key'])
-                        captured_key = True
-                    if 'md5' in result:
-                        display_captured_data("md5", result['md5'])
-                        captured_md5 = True
-
-                    # 两个数据都拿到后，直接跳出循环
-                    if captured_key and captured_md5:
-                        console.print("\n[bold green]🎉 恭喜！数据库密钥与图片解密参数已全部收集完毕！[/bold green]")
-                        break
-                    live.start()
-                time.sleep(0.05)
+                    display_captured_key(result['key'])
+                    console.print("\n[bold green]🎉 恭喜！数据库密钥已捕获完毕！[/bold green]")
+                    break
+                    
+                time.sleep(0.1)
 
     except KeyboardInterrupt:
         console.print("\n[bold yellow][*] 收到中断信号，准备退出...[/bold yellow]")
@@ -117,7 +125,6 @@ def main():
         console.print("[*] 正在清理内存并还原目标进程的指令集...")
         wx_key.cleanup_hook()
         console.print("[bold green]✅ 资源释放完毕，Hook 已安全卸载。[/bold green]")
-
 
 if __name__ == "__main__":
     main()

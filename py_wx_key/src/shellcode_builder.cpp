@@ -1,4 +1,4 @@
-﻿#include "../include/shellcode_builder.h"
+#include "../include/shellcode_builder.h"
 #include "../include/ipc_manager.h"
 #include <xbyak/xbyak.h>
 #include <cstddef>
@@ -169,14 +169,14 @@ std::vector<BYTE> ShellcodeBuilder::BuildMd5HookShellcode(const ShellcodeConfig&
         code.push(code.rbx); code.push(code.rbp); code.push(code.rsi); code.push(code.rdi);
         code.push(code.r8); code.push(code.r9); code.push(code.r10); code.push(code.r11);
         code.push(code.r12); code.push(code.r13); code.push(code.r14); code.push(code.r15);
-        };
+    };
 
     auto emitRestoreRegs = [&]() {
         code.pop(code.r15); code.pop(code.r14); code.pop(code.r13); code.pop(code.r12);
         code.pop(code.r11); code.pop(code.r10); code.pop(code.r9); code.pop(code.r8);
         code.pop(code.rdi); code.pop(code.rsi); code.pop(code.rbp); code.pop(code.rbx);
         code.pop(code.rdx); code.pop(code.rcx); code.pop(code.rax); code.popfq();
-        };
+    };
 
     if (enableStackSpoofing) {
         code.push(code.rax); code.push(code.r10); code.push(code.r11);
@@ -202,8 +202,6 @@ std::vector<BYTE> ShellcodeBuilder::BuildMd5HookShellcode(const ShellcodeConfig&
     code.add(code.rdi, static_cast<uint32_t>(kSharedMd5BufferOffset));                 // rdi -> md5Buffer
     code.mov(code.rsi, code.rcx);                  // rsi = 源地址 (rcx)
 
-    // 注意：rep movsb 会消耗 rcx，但因为刚才我们 emitSaveRegs 压过栈了，
-    // 后面 emitRestoreRegs 会自动还原原始的 rcx，所以随便用不影响原程序！
     code.mov(code.rcx, 64);                        // 拷贝 64 个字节
     code.rep();
     code.movsb();                                  // rep movsb

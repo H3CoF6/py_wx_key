@@ -1,4 +1,4 @@
-﻿#ifndef IPC_MANAGER_H
+#ifndef IPC_MANAGER_H
 #define IPC_MANAGER_H
 
 #include <Windows.h>
@@ -77,4 +77,3 @@ private:
 };
 
 #endif // IPC_MANAGER_H
-
