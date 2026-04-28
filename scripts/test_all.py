@@ -25,19 +25,21 @@ MD5_OFFSET = 4
 # ===========================================
 
 def get_wechat_pid():
+    candidates = ['WeChat.exe', 'weixin.exe']
     for proc in psutil.process_iter(['pid', 'name']):
-        if proc.info['name'].lower() == 'weixin.exe':
-            return proc.info['pid']
-    return None
+        if proc.info['name'] and proc.info['name'].lower() in [c.lower() for c in candidates]:
+            return proc.info['pid'], proc.info['name']
+    return None, None
 
 def main():
-    pid = get_wechat_pid()
+    pid, proc_name = get_wechat_pid()
     if not pid:
-        console.print("[bold red]❌ 未找到运行中的 WeXin.exe 进程。[/bold red]")
+        console.print("[bold red]❌ 未找到运行中的 WeChat.exe 或 weixin.exe 进程。[/bold red]")
         return
 
     title = Text("WeChat All-in-One Key Capture Demo", justify="center", style="bold magenta")
     console.print(Panel(title, border_style="blue"))
+    console.print(f"[bold green]目标进程: {proc_name} (PID: {pid})[/bold green]")
 
     # 1. 演示【本地文件算法提取】(无需 Hook)
     console.print("\n[bold yellow][1/3] 正在执行本地算法提取 (无需注入/无需 Hook)...[/bold yellow]")

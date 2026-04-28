@@ -235,19 +235,34 @@ HOOK_API bool InitializeHook(DWORD targetPid, const char* md5Pattern, const char
     g_ctx.ResetDataQueues();
     SendStatus("开始初始化Hook系统...", 0);
 
+    // 检查管理员权限
+    HANDLE hToken;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+        TOKEN_ELEVATION elevation;
+        DWORD size;
+        if (GetTokenInformation(hToken, TokenElevation, &elevation, sizeof(elevation), &size)) {
+            if (!elevation.TokenIsElevated) {
+                SendStatus("[警告] 当前进程未以管理员权限运行，Hook 初始化可能会失败。", 1);
+            }
+        }
+        CloseHandle(hToken);
+    }
+
     if (!IndirectSyscalls::Initialize()) {
         SetLastError(FormatWin32Error("初始化间接系统调用失败", GetLastError()));
         g_ctx.FreeLock();
         return false;
     }
 
-    MY_OBJECT_ATTRIBUTES objAttr = { sizeof(MY_OBJECT_ATTRIBUTES) };
+    MY_OBJECT_ATTRIBUTES objAttr = { 0 }; // 完整置零
+    objAttr.Length = sizeof(MY_OBJECT_ATTRIBUTES);
     MY_CLIENT_ID clientId = { (PVOID)(ULONG_PTR)targetPid, 0 };
     HANDLE hProcess = NULL;
     NTSTATUS status = IndirectSyscalls::NtOpenProcess(&hProcess, PROCESS_ALL_ACCESS, &objAttr, &clientId);
     g_ctx.hProcess = hProcess;
     if (status != STATUS_SUCCESS || !g_ctx.hProcess) {
-        SetLastError(FormatNtStatusError("打开目标进程失败", status));
+        std::string errMsg = "打开目标进程失败 (PID: " + std::to_string(targetPid) + ")";
+        SetLastError(FormatNtStatusError(errMsg, status));
         CleanupContext();
         return false;
     }

@@ -61,11 +61,8 @@ namespace {
             return nullptr;
         }
 
-        HMODULE hNtdll = LoadLibraryExW(
-            ntdllPath,
-            nullptr,
-            LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE | LOAD_LIBRARY_AS_IMAGE_RESOURCE | LOAD_LIBRARY_SEARCH_SYSTEM32
-        );
+        // 使用 DONT_RESOLVE_DLL_REFERENCES 加载，既能 GetProcAddress 又避免触发重定向或挂钩
+        HMODULE hNtdll = LoadLibraryExW(ntdllPath, nullptr, DONT_RESOLVE_DLL_REFERENCES);
         if (!hNtdll) {
             return nullptr;
         }
@@ -237,13 +234,17 @@ uint32_t IndirectSyscalls::ExtractSyscallNumber(void* fnAddress) {
         return UINT32_MAX;
     }
     const uint8_t* code = reinterpret_cast<const uint8_t*>(fnAddress);
-    // 扫描前24字节，寻找 mov eax, imm32
-    for (size_t i = 0; i < 24; ++i) {
-        if (code[i] == 0xB8 && i + 4 < 24) { // mov eax, imm32
-            uint32_t ssn = *reinterpret_cast<const uint32_t*>(code + i + 1);
-            return ssn;
+    
+    // 扫描前 32 字节，寻找标准 x64 stub 模式:
+    // 4C 8B D1       mov r10, rcx
+    // B8 XX XX XX XX  mov eax, ssn
+    for (size_t i = 0; i < 32; ++i) {
+        if (code[i] == 0x4C && code[i+1] == 0x8B && code[i+2] == 0xD1 && 
+            code[i+3] == 0xB8) {
+            return *reinterpret_cast<const uint32_t*>(code + i + 4);
         }
     }
+    
     return UINT32_MAX;
 }
 
