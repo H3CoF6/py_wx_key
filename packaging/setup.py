@@ -17,7 +17,8 @@ setup(
         'wx_key': ['*.pyd', '*.so'],
     },
     distclass=BinaryDistribution,
-    # Windows: 固定 win_amd64；Linux: 让 bdist_wheel 用本机 tag（manylinux 由
-    # auditwheel 在 CI 里重打）
+    # Windows: 固定 win_amd64（CI 用 windows-latest 构建）。
+    # Linux: 交给 bdist_wheel 用本机 tag（linux_x86_64），产物基线是构建机——
+    # CI 固定用 ubuntu-22.04（glibc 2.35），比它更老的发行版跑不了，属预期。
     options={'bdist_wheel': {'plat_name': 'win_amd64'}} if sys.platform == 'win32' else {},
 )

@@ -63,7 +63,12 @@ jobs:
   build-linux:
     name: Build Linux wheels for Python ${{ matrix.python-version }}
     # 产物基线：Ubuntu 22.04（glibc 2.35）。比它更老的发行版跑不了，属预期。
-    # bdist_wheel 先打成 linux_x86_64，再由 auditwheel 重打成 manylinux 标签。
+    #
+    # 打的是裸 linux_x86_64（不做 manylinux 重打）：与 Windows 那套裸 win_amd64
+    # wheel 的约定一致，消费方（WCDA 的 tools/key_wheels + find-links）直接可用。
+    # 不用 auditwheel 是因为 22.04 自带的 patchelf 0.14.3 < auditwheel 要求的 0.14.5；
+    # 若以后确实需要 manylinux 标签，正确做法是改用 pypa/manylinux 容器（或 cibuildwheel）
+    # 在镜像内构建 + repair，而不是在宿主机上硬凑 patchelf。
     runs-on: ubuntu-22.04
     strategy:
       matrix:
@@ -79,7 +84,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install setuptools wheel pybind11 cmake ninja auditwheel
+        pip install setuptools wheel pybind11 cmake ninja
 
     - name: CMake Configuration
       run: |
@@ -103,15 +108,17 @@ jobs:
       run: |
         python setup.py bdist_wheel
 
-    - name: Repair Wheel (auditwheel -> manylinux)
+    # 防"空包"：这个打包方式是预编译 .so + setup.py，.so 没被 cp 进去时
+    # bdist_wheel 依然成功，只是产出一个没有扩展模块的坏 wheel。
+    - name: Verify wheel contains the extension
       run: |
-        auditwheel repair -w wheelhouse packaging/dist/*.whl
+        python -c "import glob,zipfile,sys; w=glob.glob('packaging/dist/*.whl')[0]; s=[n for n in zipfile.ZipFile(w).namelist() if n.endswith('.so')]; print(w,'->',s); sys.exit(0 if s else 1)"
 
     - name: Upload Wheel artifact
       uses: actions/upload-artifact@v4
       with:
         name: wheel-linux-${{ matrix.python-version }}
-        path: wheelhouse/*.whl
+        path: packaging/dist/*.whl
 
   test-linux:
     name: Linux hook regression tests
