@@ -36,7 +36,7 @@ jobs:
         cmake -S py_wx_key -B build `
           "-Dpybind11_DIR=$pb_path" `
           "-DPython_EXECUTABLE=$py_path" `
-          -DCMAKE_BUILD_TYPE=Release                 
+          -DCMAKE_BUILD_TYPE=Release                
 
     - name: Build Extension
       run: |
@@ -60,8 +60,95 @@ jobs:
         name: wheel-${{ matrix.python-version }}
         path: packaging/dist/*.whl
 
+  build-linux:
+    name: Build Linux wheels for Python ${{ matrix.python-version }}
+    # 产物基线：Ubuntu 22.04（glibc 2.35）。比它更老的发行版跑不了，属预期。
+    # bdist_wheel 先打成 linux_x86_64，再由 auditwheel 重打成 manylinux 标签。
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        pip install setuptools wheel pybind11 cmake ninja auditwheel
+
+    - name: CMake Configuration
+      run: |
+        cmake -S py_wx_key -B build -G Ninja \
+          "-Dpybind11_DIR=$(python -c 'import pybind11; print(pybind11.get_cmake_dir())')" \
+          "-DPython_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')" \
+          -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build Extension
+      run: |
+        cmake --build build
+
+    - name: Move .so to packaging
+      run: |
+        mkdir -p packaging/wx_key
+        cp build/wx_key.*.so packaging/wx_key/
+        if [ ! -f packaging/wx_key/__init__.py ]; then echo "from .wx_key import *" > packaging/wx_key/__init__.py; fi
+
+    - name: Build Wheel
+      working-directory: ./packaging
+      run: |
+        python setup.py bdist_wheel
+
+    - name: Repair Wheel (auditwheel -> manylinux)
+      run: |
+        auditwheel repair -w wheelhouse packaging/dist/*.whl
+
+    - name: Upload Wheel artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: wheel-linux-${{ matrix.python-version }}
+        path: wheelhouse/*.whl
+
+  test-linux:
+    name: Linux hook regression tests
+    # 不需要微信：假目标 + 真 ptrace，覆盖 TRACEME 自启动、新线程布防、
+    # 线程亲和性前提、以及锚点推导（对 build 出来的假目标）。
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+
+    - name: Install dependencies
+      run: |
+        pip install pybind11 cmake ninja
+
+    - name: CMake Configuration
+      run: |
+        cmake -S py_wx_key -B build -G Ninja \
+          "-Dpybind11_DIR=$(python -c 'import pybind11; print(pybind11.get_cmake_dir())')" \
+          "-DPython_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')" \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DWXK_BUILD_TESTS=ON
+
+    - name: Build
+      run: |
+        cmake --build build
+
+    - name: Test
+      run: |
+        ctest --test-dir build --output-on-failure
+
   merge_artifacts:
-    needs: build
+    needs: [build, build-linux]
     runs-on: ubuntu-latest
     steps:
       - name: Merge Artifacts
