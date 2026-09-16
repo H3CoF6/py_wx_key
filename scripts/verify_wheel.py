@@ -9,6 +9,9 @@
   都连带多打一份无用的二进制（Windows 的 wheel 里塞进 linux .so 这种）。
 
 用法: python scripts/verify_wheel.py [glob]   # 默认 packaging/dist/*.whl
+
+注意：运行期输出必须是纯 ASCII（脚本自身可以是 UTF-8）。CI 的 Windows runner
+控制台编码是 cp1252，print 中文会 UnicodeEncodeError 把整个 job 弄挂。
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ def main(argv: list[str]) -> int:
     major, minor = sys.version_info[:2]
     wheels = sorted(glob.glob(pattern))
     if not wheels:
-        print(f"FAIL: 没有匹配 {pattern} 的 wheel")
+        print(f"FAIL: no wheel matched {pattern}")
         return 1
 
     failed = False
@@ -40,7 +43,7 @@ def main(argv: list[str]) -> int:
         ok = len(modules) == 1 and _matches_target(modules[0], major, minor)
         print(
             f"{'OK  ' if ok else 'FAIL'} {wheel} "
-            f"(目标 cp{major}{minor}) -> {modules}"
+            f"(target cp{major}{minor}) -> {modules}"
         )
         failed |= not ok
     return 1 if failed else 0
