@@ -3,3 +3,9 @@ build/
 dist/
 *.pyd
 wx_key.egg-info/
+
+# 预编译的扩展模块只由构建产出，绝不入库。packaging/wx_key/ 是 wheel 的
+# 打包暂存目录，setup.py 的 package_data 用通配符收 *.so/*.pyd，一旦这里
+# 混进别的平台/别的 Python 版本的旧产物，每个 wheel 都会连带把它打进去。
+packaging/wx_key/*.so
+packaging/wx_key/*.dll
